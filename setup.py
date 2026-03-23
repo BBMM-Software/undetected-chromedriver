@@ -9,7 +9,7 @@ long_desc = fd.read()
 fd.close()
 
 setup(
-    name="undetected-chromedriver",
+    name="bbmm-undetected-chromedriver",
     version='3.6.3',
     packages=["undetected_chromedriver"],
     install_requires=[
