@@ -18,8 +18,7 @@ setup(
         "websockets>=12.0",  # Updated to latest as of Mar 2024
         "packaging>=23.0", # Specify a recent version
     ],
-    # Examples live under example/; they are not package data.
-    url="https://github.com/ultrafunkamsterdam/undetected-chromedriver",
+    url="https://github.com/BBMM-Software/undetected-chromedriver",
     license="GPL-3.0",
     author="BBMM Software",
     author_email="tudor@bbmmsoftware.com",

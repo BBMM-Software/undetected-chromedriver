@@ -2,7 +2,6 @@
 
 https://github.com/ultrafunkamsterdam/undetected-chromedriver
 
-> **This fork (PyPI: `bbmm-undetected-chromedriver`):** adds **proxy support** — `proxy_server=` on `uc.Chrome`, local HTTP forwarder for authenticated proxies, `packaging.version` fixes in `patcher`, and related helpers. Same import name: `import undetected_chromedriver as uc`. See **RELEASING.md** for uploading to PyPI.
 
 Optimized Selenium Chromedriver patch which does not trigger anti-bot services like Distill Network / Imperva / DataDome / Botprotect.io
 Automatically downloads the driver binary and patches it.
