@@ -13,9 +13,18 @@ Automatically downloads the driver binary and patches it.
 
 ## Installation ##
 
+**Upstream package:**
+
 ```
 pip install undetected-chromedriver
 ```
+
+**This fork (PyPI distribution name):**
+
+```
+pip install bbmm-undetected-chromedriver
+```
+
 or , if you're feeling adventurous, install directly via github
 
 ```

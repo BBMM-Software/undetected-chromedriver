@@ -17,7 +17,7 @@ by UltrafunkAmsterdam (https://github.com/ultrafunkamsterdam)
 from __future__ import annotations
 
 
-__version__ = "3.5.5"
+__version__ = "3.6.2"
 
 import json
 import logging
@@ -28,19 +28,27 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from weakref import finalize
+from typing import Optional
 
 import selenium.webdriver.chrome.service
 import selenium.webdriver.chrome.webdriver
-from selenium.webdriver.common.by import By
 import selenium.webdriver.chromium.service
 import selenium.webdriver.remote.command
 import selenium.webdriver.remote.webdriver
+from selenium.common.exceptions import NoSuchWindowException
 
 from .cdp import CDP
 from .dprocess import start_detached
 from .options import ChromeOptions
+from .proxy import ProxySetup
+from .proxy import apply_proxy_to_options
+from .proxy import fetch_direct_public_ip
+from .proxy import normalize_proxy_url
+from .proxy import parse_ipify_json_text
+from .proxy import verify_proxy_egress
 from .patcher import IS_POSIX
 from .patcher import Patcher
 from .reactor import Reactor
@@ -55,10 +63,26 @@ __all__ = (
     "Reactor",
     "CDP",
     "find_chrome_executable",
+    "ProxySetup",
+    "apply_proxy_to_options",
+    "fetch_direct_public_ip",
+    "normalize_proxy_url",
+    "parse_ipify_json_text",
+    "verify_proxy_egress",
 )
 
 logger = logging.getLogger("uc")
 logger.setLevel(logging.getLogger().getEffectiveLevel())
+
+
+def _daemon_drain_pipe(stream):
+    try:
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                break
+    except Exception:
+        pass
 
 
 class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
@@ -98,7 +122,6 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
     --------------------------------------------------------------------------
     """
 
-    _instances = set()
     session_id = None
     debug = False
 
@@ -125,6 +148,7 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
         debug=False,
         no_sandbox=True,
         user_multi_procs: bool = False,
+        proxy_server: Optional[str] = None,
         **kw,
     ):
         """
@@ -243,6 +267,12 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
             for this to work. YOU MUST HAVE AT LEAST 1 UNDETECTED_CHROMEDRIVER BINARY IN YOUR ROAMING DATA FOLDER.
             this requirement can be easily satisfied, by just running this program "normal" and close/kill it.
 
+        proxy_server: str, optional, default: None
+            HTTP/HTTPS or SOCKS5 proxy URL. Examples: ``http://host:port``,
+            ``http://user:pass@host:port``, ``socks5://host:port``.
+            User/password HTTP proxies use a small bundled extension (not Selenium Wire).
+            This does not add "stealth" by itself; it only routes browser traffic.
+
 
         """
 
@@ -283,6 +313,18 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
         else:
             debug_host, debug_port = options.debugger_address.split(":")
             debug_port = int(debug_port)
+
+        self._forward_proxy = None
+        self._proxy_server_used = bool(proxy_server and str(proxy_server).strip())
+        if proxy_server:
+            ps = apply_proxy_to_options(
+                options,
+                proxy_server,
+                devtools_host=debug_host,
+                devtools_port=debug_port,
+            )
+            if ps:
+                self._forward_proxy = ps.forward_proxy
 
         if enable_cdp_events:
             options.set_capability(
@@ -409,9 +451,6 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
 
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--start-maximized")
-        options.add_argument("--no-sandbox")
-        # fixes "could not connect to chrome" error when running
-        # on linux using privileged user like root (which i don't recommend)
 
         options.add_argument(
             "--log-level=%d" % log_level
@@ -436,7 +475,7 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
                 json.dump(config, fs)
                 fs.truncate()  # the file might be shorter
                 logger.debug("fixed exit_type flag")
-        except Exception as e:
+        except Exception:
             logger.debug("did not find a bad exit_type flag ")
 
         self.options = options
@@ -449,15 +488,26 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
                 options.binary_location, *options.arguments
             )
         else:
+            # Drain stdout/stderr in threads — DEVNULL can break Chrome on some systems;
+            # raw PIPE fills up and blocks the browser when extensions log.
             browser = subprocess.Popen(
                 [options.binary_location, *options.arguments],
-                stdin=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 close_fds=IS_POSIX,
             )
             self.browser_pid = browser.pid
-
+            threading.Thread(
+                target=_daemon_drain_pipe, args=(browser.stdout,), daemon=True
+            ).start()
+            threading.Thread(
+                target=_daemon_drain_pipe, args=(browser.stderr,), daemon=True
+            ).start()
+            if getattr(self, "_forward_proxy", None) or getattr(
+                self, "_proxy_server_used", False
+            ):
+                time.sleep(0.75)
 
         service = selenium.webdriver.chromium.service.ChromiumService(
             self.patcher.executable_path
@@ -662,14 +712,24 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
     def get(self, url):
         # if self._get_cdc_props():
         #     self._hook_remove_cdc_props()
-        return super().get(url)
+        retries = (
+            3
+            if (
+                getattr(self, "_forward_proxy", None)
+                or getattr(self, "_proxy_server_used", False)
+            )
+            else 1
+        )
+        for attempt in range(retries):
+            try:
+                return super().get(url)
+            except NoSuchWindowException:
+                if attempt == retries - 1:
+                    raise
+                time.sleep(0.6)
 
     def add_cdp_listener(self, event_name, callback):
-        if (
-            self.reactor
-            and self.reactor is not None
-            and isinstance(self.reactor, Reactor)
-        ):
+        if self.reactor and isinstance(self.reactor, Reactor):
             self.reactor.add_event_handler(event_name, callback)
             return self.reactor.handlers
         return False
@@ -697,8 +757,6 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
 
         """
         if not hasattr(self, "cdp"):
-            from .cdp import CDP
-
             cdp = CDP(self.options)
             cdp.tab_new(url)
 
@@ -733,7 +791,7 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
         using generator, when the element is returned we are in the correct frame
         to use it directly
         Args:
-            by: By
+            by: locator strategy (e.g. ``By.ID`` from Selenium)
             value: str
         Returns: Generator[webelement.WebElement]
         """
@@ -775,6 +833,12 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
             logger.debug("gracefully closed browser")
         except Exception as e:  # noqa
             pass
+        if getattr(self, "_forward_proxy", None):
+            try:
+                self._forward_proxy.stop()
+            except Exception:
+                pass
+            self._forward_proxy = None
         if (
             hasattr(self, "keep_user_data_dir")
             and hasattr(self, "user_data_dir")
