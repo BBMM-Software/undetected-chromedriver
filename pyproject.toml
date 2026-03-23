@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bbmm-undetected-chromedriver"
+dynamic = ["version"]
+description = "Selenium Chrome replacement with anti-detection patches; this fork adds proxy support (local forwarder, proxy_server=)."
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.8"
+authors = [
+    { name = "UltrafunkAmsterdam (original)" },
+]
+maintainers = [
+    { name = "BBMM fork" },
+]
+keywords = [
+    "selenium",
+    "chromedriver",
+    "undetected",
+    "webdriver",
+    "proxy",
+    "automation",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+]
+dependencies = [
+    "selenium>=4.18.1",
+    "requests>=2.31.0",
+    "websockets>=12.0",
+    "packaging>=23.0",
+]
+
+[project.optional-dependencies]
+dev = ["build>=1.0", "twine>=5.0"]
+
+[project.urls]
+Homepage = "https://github.com/BBMM-Software/undetected-chromedriver"
+Repository = "https://github.com/BBMM-Software/undetected-chromedriver"
+Changelog = "https://github.com/BBMM-Software/undetected-chromedriver/releases"
+
+[tool.setuptools]
+packages = ["undetected_chromedriver"]
+
+[tool.setuptools.dynamic]
+version = { attr = "undetected_chromedriver.__version__" }
